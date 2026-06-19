@@ -1,0 +1,20 @@
+{
+  "name": "codelingo-translator",
+  "version": "1.0.0",
+  "description": "Browser-based code translation and optimization app with an OpenAI-compatible backend.",
+  "private": true,
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "check": "node --check server.js && node --check app.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}

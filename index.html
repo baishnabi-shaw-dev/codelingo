@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CodeLingo Translator</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace" aria-label="Code translator workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Realtime code intelligence</p>
+            <h1>CodeLingo Translator</h1>
+          </div>
+          <div class="status-pill" id="statusPill">Ready</div>
+        </header>
+
+        <section class="editor-grid">
+          <article class="panel editor-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Source Code</h2>
+                <p>Paste code below. The app detects the language automatically.</p>
+              </div>
+              <button class="icon-button" id="sampleButton" type="button" title="Load sample code" aria-label="Load sample code">
+                <span aria-hidden="true">{} </span>
+              </button>
+            </div>
+            <textarea id="sourceCode" spellcheck="false" aria-label="Source code editor" placeholder="Paste Java, Python, JavaScript, C++, Kotlin, C#, PHP, Ruby, Go, or TypeScript code here..."></textarea>
+          </article>
+
+          <aside class="panel controls-panel">
+            <div class="detected-card">
+              <span class="label">Detected language</span>
+              <strong id="detectedLanguage">Unknown</strong>
+              <span id="confidenceText">Waiting for code</span>
+            </div>
+
+            <label class="field">
+              <span>Translate to</span>
+              <select id="targetLanguage" aria-label="Target language"></select>
+            </label>
+
+            <div class="switch-row">
+              <label>
+                <input id="optimizeToggle" type="checkbox" checked>
+                Optimize code
+              </label>
+              <label>
+                <input id="commentsToggle" type="checkbox" checked>
+                Add helpful comments
+              </label>
+            </div>
+
+            <div class="field">
+              <span>Translation style</span>
+              <div class="mode-group" id="styleSelect" role="group" aria-label="Translation style">
+                <button class="mode-button active" type="button" data-style="production-ready" aria-pressed="true">Production</button>
+                <button class="mode-button" type="button" data-style="beginner-friendly" aria-pressed="false">Beginner</button>
+                <button class="mode-button" type="button" data-style="performance-focused" aria-pressed="false">Performance</button>
+                <button class="mode-button" type="button" data-style="framework-neutral" aria-pressed="false">Neutral</button>
+              </div>
+            </div>
+
+            <button class="primary-button" id="translateButton" type="button">Translate Code</button>
+          </aside>
+        </section>
+
+        <section class="result-grid">
+          <article class="panel">
+            <div class="panel-head compact">
+              <h2>Code Optimization</h2>
+              <button class="text-button" id="copyReportButton" type="button">Copy</button>
+            </div>
+            <div class="comparison-grid">
+              <section class="code-compare-block" aria-label="Original code">
+                <h3>Original Code</h3>
+                <pre class="code-output compare-output"><code id="originalCodeBlock">Paste code to compare optimization results.</code></pre>
+              </section>
+              <section class="code-compare-block" aria-label="Optimized code">
+                <h3>Optimized Code</h3>
+                <pre class="code-output compare-output optimized"><code id="optimizedCodeBlock">Optimized code will appear here.</code></pre>
+              </section>
+            </div>
+            <div class="optimization-notes">
+              <h3>Changes Made</h3>
+              <ul class="report-list" id="optimizationList"></ul>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head compact">
+              <h2>Translated Output</h2>
+              <button class="text-button" id="copyOutputButton" type="button">Copy</button>
+            </div>
+            <pre class="code-output"><code id="translatedOutput">Your translated code will appear here.</code></pre>
+          </article>
+        </section>
+
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
