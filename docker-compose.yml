@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: codelingo-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: codelingo
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - codelingo-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: codelingo-backend
+    environment:
+      NODE_ENV: development
+      MONGODB_URI: mongodb://admin:password@mongodb:27017/codelingo
+      PORT: 5000
+      JWT_SECRET: development-secret-key-change-in-production
+    ports:
+      - '5000:5000'
+    depends_on:
+      - mongodb
+    networks:
+      - codelingo-network
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: codelingo-frontend
+    ports:
+      - '3000:3000'
+    environment:
+      VITE_API_URL: http://localhost:5000
+    networks:
+      - codelingo-network
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  mongodb_data:
+
+networks:
+  codelingo-network:
+    driver: bridge

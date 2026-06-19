@@ -11,43 +11,13 @@ const languages = [
   "PHP",
   "Ruby",
   "Swift",
-  "Rust",
-  "Dart",
-  "R"
+  "Rust"
 ];
 
 const supportedBraceLanguages = new Set(["JavaScript", "TypeScript", "Java", "Kotlin", "C", "C++", "C#", "Go", "Rust"]);
 const cLikeReturnLanguages = new Set(["C", "C++"]);
 const singleClosingBraceLanguages = new Set(["Kotlin", "Go", "Rust"]);
 const noSemicolonLanguages = new Set(["Kotlin", "Go", "Swift", "Ruby"]);
-const localTranslationPairs = new Set([
-  "C->Python",
-  "C++->Python",
-  "Java->Python",
-  "JavaScript->Python",
-  "C#->Python",
-  "Python->JavaScript",
-  "Python->TypeScript",
-  "Python->Java",
-  "Python->Kotlin",
-  "Python->C",
-  "Python->C++",
-  "Python->C#",
-  "Python->Go",
-  "Python->Rust"
-]);
-
-const expertTranslationSystemPrompt = [
-  "You are an expert multilingual software engineer and code transpilation specialist.",
-  "Automatically detect the source language and translate it to the requested target language.",
-  "Preserve behavior, logic, algorithms, data structures, comments, side effects, input/output behavior, error handling, and edge cases.",
-  "Generate complete executable, idiomatic, production-ready, syntax-valid target-language code.",
-  "Add all required imports, package/library usage, entry points, and dependency notes.",
-  "Handle OOP, functional, asynchronous, generic/type-system, memory, module, and language-specific features correctly.",
-  "Optimize readability and performance only when behavior is unchanged.",
-  "If exact translation is impossible because of missing runtime context, platform APIs, dependencies, or undefined behavior, say so in compatibility notes and choose the closest executable equivalent.",
-  "Return: detected language, required dependencies, compatibility notes, and complete translated code."
-].join(" ");
 
 const sourceCode = document.getElementById("sourceCode");
 const detectedLanguage = document.getElementById("detectedLanguage");
@@ -76,28 +46,6 @@ const styleLabels = {
   "framework-neutral": "Neutral"
 };
 let selectedStyle = defaultStyle;
-const endpointCacheKey = "codeLingoTranslationEndpoint";
-const defaultBackendCandidates = (() => {
-  const candidates = [];
-
-  if (window.CODE_TRANSLATE_API_URL) {
-    candidates.push(window.CODE_TRANSLATE_API_URL);
-  }
-
-  if (window.location.origin && window.location.origin !== "null") {
-    candidates.push(new URL("/api/translate", window.location.origin).toString());
-  }
-
-  candidates.push("http://localhost:3000/api/translate");
-  candidates.push("http://127.0.0.1:3000/api/translate");
-
-  for (let port = 3001; port <= 3010; port += 1) {
-    candidates.push(`http://localhost:${port}/api/translate`);
-    candidates.push(`http://127.0.0.1:${port}/api/translate`);
-  }
-
-  return [...new Set(candidates)];
-})();
 
 const sampleJava = `public class Main {
   public static void main(String[] args) {
@@ -125,9 +73,7 @@ const detectors = [
   { name: "PHP", tests: [[/<\?php/, 5], [/\$\w+/, 3], [/echo\s+/, 3], [/->/, 2]] },
   { name: "Ruby", tests: [[/\bdef\s+\w+/, 3], [/\bputs\s+/, 4], [/\bend\b/, 3], [/@\w+/, 2]] },
   { name: "Swift", tests: [[/\bfunc\s+\w+\(/, 4], [/\bvar\b|\blet\b/, 2], [/^\s*print\s*\(/m, 1], [/\bimport\s+Foundation\b/, 5]] },
-  { name: "Rust", tests: [[/\bfn\s+main\(/, 5], [/\blet\s+mut\b/, 4], [/println!\(/, 5], [/\buse\s+std::/, 4]] },
-  { name: "Dart", tests: [[/\bvoid\s+main\s*\(/, 5], [/\bimport\s+['"]dart:/, 5], [/\bfinal\b|\bvar\b/, 2], [/\bprint\s*\(/, 2]] },
-  { name: "R", tests: [[/<-/, 4], [/\bfunction\s*\(/, 4], [/\bcat\s*\(/, 3], [/\bprint\s*\(/, 1]] }
+  { name: "Rust", tests: [[/\bfn\s+main\(/, 5], [/\blet\s+mut\b/, 4], [/println!\(/, 5], [/\buse\s+std::/, 4]] }
 ];
 
 const typeMap = {
@@ -143,9 +89,7 @@ const typeMap = {
   PHP: { int: "", double: "", float: "", char: "", String: "", boolean: "", bool: "" },
   Ruby: { int: "", double: "", float: "", char: "", String: "", boolean: "", bool: "" },
   Swift: { int: "var", double: "var", float: "var", char: "var", String: "var", boolean: "var", bool: "var" },
-  Rust: { int: "let mut", double: "let mut", float: "let mut", char: "let mut", String: "let mut", boolean: "let mut", bool: "let mut" },
-  Dart: { int: "int", double: "double", float: "double", char: "String", String: "String", boolean: "bool", bool: "bool" },
-  R: { int: "", double: "", float: "", char: "", String: "", boolean: "", bool: "" }
+  Rust: { int: "let mut", double: "let mut", float: "let mut", char: "let mut", String: "let mut", boolean: "let mut", bool: "let mut" }
 };
 
 const commentPattern = /(\/\/.*|#.*)$/;
@@ -212,96 +156,15 @@ function detectLanguage(code) {
 }
 
 function normalizeExpression(expression, target) {
-  let normalized = expression.trim();
-
-  if (target === "Python") {
-    normalized = normalized
-      .replace(/\btrue\b/g, "True")
-      .replace(/\bfalse\b/g, "False")
-      .replace(/\bnull\b/g, "None")
-      .replace(/\bNULL\b/g, "None")
-      .replace(/&&/g, " and ")
-      .replace(/\|\|/g, " or ")
-      .replace(/!(?!=)/g, "not ");
-  }
-
-  return normalized
-    .replace(/\s+/g, " ")
-    .replace(/\s*([+\-*/%<>]=?|==|!=)\s*/g, " $1 ")
-    .replace(/\s*,\s*/g, ", ")
-    .trim()
+  return expression
     .replace(/\btrue\b/g, target === "Python" ? "True" : "true")
     .replace(/\bfalse\b/g, target === "Python" ? "False" : "false")
     .replace(/\bnull\b/g, target === "Python" ? "None" : "null")
-    .replace(/\b(\w+)\.length\b/g, target === "Python" ? "len($1)" : "$1.length")
     .replace(/([A-Za-z_]\w*)\.length\b/g, "$1.length");
 }
 
 function formatStyle(style) {
   return styleLabels[style] || styleLabels[defaultStyle];
-}
-
-function getStandardDependencies(language) {
-  const dependencies = {
-    Python: ["Python 3 standard library"],
-    JavaScript: ["Node.js or modern browser runtime"],
-    TypeScript: ["TypeScript compiler", "Node.js or browser runtime"],
-    Java: ["JDK"],
-    Kotlin: ["Kotlin compiler/JVM"],
-    C: ["C compiler", "stdio.h"],
-    "C++": ["C++17 compiler", "iostream", "vector"],
-    "C#": [".NET SDK"],
-    Go: ["Go toolchain", "fmt"],
-    PHP: ["PHP runtime"],
-    Ruby: ["Ruby runtime"],
-    Swift: ["Swift toolchain"],
-    Rust: ["Rust toolchain"],
-    Dart: ["Dart SDK"],
-    R: ["R runtime"]
-  };
-
-  return dependencies[language] || ["Target language runtime/toolchain"];
-}
-
-function buildCompatibilityNotes(sourceLanguage, target, mode) {
-  const notes = [];
-
-  if (mode === "local") {
-    notes.push("Local browser translation uses deterministic rules and is intended for simple imperative code only.");
-    notes.push("For production-grade accuracy across arbitrary languages, configure window.CODE_TRANSLATE_API_URL and validate with target-language compilers/tests.");
-  }
-
-  if (sourceLanguage === "Unknown") {
-    notes.push("Source language could not be detected confidently.");
-  }
-
-  if (target === "Python") {
-    notes.push("C/C-like input functions named input are renamed to read_bounded_int to avoid shadowing Python's built-in input().");
-  }
-
-  return notes.length ? notes : ["No special compatibility notes."];
-}
-
-function formatTranslationResult({ code }) {
-  return code;
-}
-
-function buildExpertTranslationRequest(payload) {
-  return {
-    ...payload,
-    systemPrompt: expertTranslationSystemPrompt,
-    requirements: {
-      preserveBehavior: true,
-      preserveComments: true,
-      preserveIoBehavior: true,
-      completeExecutableCode: true,
-      includeImportsAndDependencies: true,
-      optimizeWithoutBehaviorChanges: payload.options?.optimize ?? true,
-      includeHelpfulComments: payload.options?.addComments ?? true,
-      validateSyntax: true,
-      responseSections: ["detectedLanguage", "requiredDependencies", "compatibilityNotes", "translatedCode"]
-    }
-  };
 }
 
 function setSelectedStyle(style, shouldRender = true) {
@@ -343,117 +206,6 @@ function stripComment(line) {
   };
 }
 
-function normalizeStatementStream(source) {
-  const statements = [];
-  let current = "";
-  let quote = "";
-  let escaped = false;
-  let parenDepth = 0;
-
-  const pushCurrent = () => {
-    const value = current.trim();
-    if (value) {
-      statements.push(value);
-    }
-    current = "";
-  };
-
-  for (const char of source) {
-    if (quote) {
-      current += char;
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === quote) {
-        quote = "";
-      }
-      continue;
-    }
-
-    if (char === '"' || char === "'") {
-      quote = char;
-      current += char;
-      continue;
-    }
-
-    if (char === "(") {
-      parenDepth += 1;
-      current += char;
-      continue;
-    }
-
-    if (char === ")") {
-      parenDepth = Math.max(0, parenDepth - 1);
-      current += char;
-      continue;
-    }
-
-    if (char === "{" || char === "}" || (char === ";" && parenDepth === 0)) {
-      pushCurrent();
-      if (char === "{" || char === "}") {
-        statements.push(char);
-      }
-      continue;
-    }
-
-    if (char === "\n" || char === "\r") {
-      pushCurrent();
-      continue;
-    }
-
-    current += char;
-  }
-
-  pushCurrent();
-  return statements;
-}
-
-function normalizePythonName(name) {
-  return name === "input" ? "read_bounded_int" : name;
-}
-
-function normalizePythonCondition(condition) {
-  const normalized = normalizeExpression(condition, "Python")
-    .replace(/\bwhile\s+/, "")
-    .replace(/\bif\s+/, "")
-    .trim();
-
-  if (normalized === "1") return "True";
-  if (normalized === "0") return "False";
-  return normalized;
-}
-
-function convertCDeclarationToPython(line) {
-  const match = line.match(/^(?:int|double|float|char|String|boolean|bool)\s+(.+)$/);
-  if (!match || /\)\s*$/.test(line)) {
-    return [];
-  }
-
-  return match[1]
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part) => {
-      const array2d = part.match(/^([A-Za-z_]\w*)\s*\[(\d+)\]\s*\[(\d+)\]$/);
-      if (array2d) {
-        return `${array2d[1]} = [[0 for _ in range(${array2d[3]})] for _ in range(${array2d[2]})]`;
-      }
-
-      const array1d = part.match(/^([A-Za-z_]\w*)\s*\[(\d+)\]$/);
-      if (array1d) {
-        return `${array1d[1]} = [0 for _ in range(${array1d[2]})]`;
-      }
-
-      const initialized = part.match(/^([A-Za-z_]\w*)\s*=\s*(.+)$/);
-      if (initialized) {
-        return `${initialized[1]} = ${normalizeExpression(initialized[2], "Python")}`;
-      }
-
-      return `${part} = 0`;
-    });
-}
-
 function convertPrintfToPython(line) {
   const match = line.match(/^printf\s*\(\s*"([^"]*)"\s*(?:,\s*(.*))?\)\s*;?$/);
   if (!match) {
@@ -493,178 +245,105 @@ function convertScanfToPython(line) {
 function toPython(source) {
   const output = [];
   let indent = 0;
-  let pendingSingleLineBlocks = 0;
-  const functionNames = new Map();
+  let previousWasHeader = false;
 
-  const emit = (line) => {
-    output.push(`${"  ".repeat(indent)}${line}`);
-  };
+  for (const rawLine of source.split(linesPattern)) {
+    let line = rawLine.trim();
 
-  const statements = normalizeStatementStream(source);
-
-  for (let index = 0; index < statements.length; index += 1) {
-    let line = statements[index].trim();
-
-    if (!line || cLikeSkipPattern.test(line) || line === "{") {
+    if (!line || cLikeSkipPattern.test(line)) {
       continue;
     }
 
-    if (line === "}") {
+    if (line.startsWith("}")) {
       indent = Math.max(0, indent - 1);
+      line = line.replace(/^}+\s*/, "");
+    }
+
+    if (!line || classDeclarationPattern.test(line)) {
+      continue;
+    }
+
+    if (/main\s*\(/.test(line)) {
+      output.push("def main():");
+      indent = 1;
+      previousWasHeader = true;
       continue;
     }
 
     const { code, comment } = stripComment(line);
     line = code;
 
-    if (!line || classDeclarationPattern.test(line)) {
-      continue;
-    }
-
-    const functionMatch = line.match(/^(?:public\s+|private\s+|static\s+|inline\s+)*(?:int|void|double|float|char|String|boolean|bool)\s+([A-Za-z_]\w*)\s*\((.*)\)$/);
-    if (functionMatch) {
-      const sourceName = functionMatch[1];
-      const pythonName = normalizePythonName(sourceName);
-      functionNames.set(sourceName, pythonName);
-      const params = functionMatch[2]
-        .split(",")
-        .map((param) => param.trim().replace(/^(?:int|double|float|char|String|boolean|bool)\s+/, ""))
-        .filter((param) => param && param !== "void")
-        .join(", ");
-      emit(`def ${pythonName}(${params}):`);
-      indent += 1;
-      continue;
-    }
-
-    const forMatch = line.match(/^for\s*\(\s*(?:int\s+)?(\w+)\s*=\s*([^;]+);\s*\1\s*([<>]=?)\s*([^;]+);\s*\1(\+\+|--)\s*\)$/);
+    const forMatch = line.match(/^for\s*\(\s*(?:int\s+)?(\w+)\s*=\s*([^;]+);\s*\1\s*<\s*([^;]+);\s*\1\+\+\s*\)\s*\{?$/);
     if (forMatch) {
-      const [, variable, start, operator, end, stepOperator] = forMatch;
-      const step = stepOperator === "--" ? ", -1" : "";
-      const comparator = operator.includes("=") ? (stepOperator === "--" ? " - 1" : " + 1") : "";
-      emit(`for ${variable} in range(${normalizeExpression(start, "Python")}, ${normalizeExpression(end, "Python")}${comparator}${step}):`);
+      output.push(`${"  ".repeat(indent)}for ${forMatch[1]} in range(${normalizeExpression(forMatch[2], "Python")}, ${normalizeExpression(forMatch[3], "Python")}):`);
       indent += 1;
-      if (statements[index + 1]?.trim() !== "{") {
-        pendingSingleLineBlocks += 1;
-      }
+      previousWasHeader = true;
       continue;
     }
 
     const scanfLine = convertScanfToPython(line);
     if (scanfLine) {
-      emit(`${scanfLine}${comment ? ` ${comment}` : ""}`);
-      if (pendingSingleLineBlocks) {
-        indent = Math.max(0, indent - pendingSingleLineBlocks);
-        pendingSingleLineBlocks = 0;
-      }
+      output.push(`${"  ".repeat(indent)}${scanfLine}${comment ? ` ${comment}` : ""}`);
+      previousWasHeader = false;
       continue;
     }
 
     const printfLine = convertPrintfToPython(line);
     if (printfLine) {
-      emit(`${printfLine}${comment ? ` ${comment}` : ""}`);
-      if (pendingSingleLineBlocks) {
-        indent = Math.max(0, indent - pendingSingleLineBlocks);
-        pendingSingleLineBlocks = 0;
-      }
+      output.push(`${"  ".repeat(indent)}${printfLine}${comment ? ` ${comment}` : ""}`);
+      previousWasHeader = false;
       continue;
     }
 
     const whileMatch = line.match(/^while\s*\((.*)\)\s*\{?$/);
     if (whileMatch) {
-      const decrementMatch = whileMatch[1].trim().match(/^([A-Za-z_]\w*)--$/);
-      if (decrementMatch) {
-        emit(`while ${decrementMatch[1]} > 0:`);
-        indent += 1;
-        emit(`${decrementMatch[1]} -= 1`);
-      } else {
-        emit(`while ${normalizePythonCondition(whileMatch[1])}:`);
-        indent += 1;
-      }
-      if (statements[index + 1]?.trim() !== "{") {
-        pendingSingleLineBlocks += 1;
-      }
-      continue;
-    }
-
-    const ifMatch = line.match(/^if\s*\((.*)\)$/);
-    if (ifMatch) {
-      const nextLine = statements[index + 1]?.trim() || "";
-      emit(`if ${normalizePythonCondition(ifMatch[1])}:`);
+      output.push(`${"  ".repeat(indent)}while ${normalizeExpression(whileMatch[1], "Python")}:`);
       indent += 1;
-      if (nextLine !== "{") {
-        pendingSingleLineBlocks += 1;
-      }
+      previousWasHeader = true;
       continue;
     }
 
-    const declarations = convertCDeclarationToPython(line);
-    if (declarations.length) {
-      declarations.forEach((declaration) => emit(declaration));
-      if (pendingSingleLineBlocks) {
-        indent = Math.max(0, indent - pendingSingleLineBlocks);
-        pendingSingleLineBlocks = 0;
-      }
+    line = line
+      .replace(/^System\.out\.println\s*\((.*)\);?$/, "print($1)")
+      .replace(/^Console\.WriteLine\s*\((.*)\);?$/, "print($1)")
+      .replace(/^console\.log\s*\((.*)\);?$/, "print($1)")
+      .replace(/^printf\s*\("([^"]*)\\n"\s*\);?$/, 'print("$1")')
+      .replace(/^printf\s*\("([^"]*)"\s*\);?$/, 'print("$1")')
+      .replace(/^printf\s*\((.*)\);?$/, "print($1)")
+      .replace(/\b(\w+)\.length\b/g, "len($1)")
+      .replace(/;$/, "");
+
+    line = line.replace(/^(?:int|double|float)\s+(\w+)\[(\d+)\]\[(\d+)\]$/, "$1 = [[0 for _ in range($3)] for _ in range($2)]");
+    line = line.replace(/^(?:int|double|float)\s+(\w+)\[(\d+)\]$/, "$1 = [0 for _ in range($2)]");
+    line = line.replace(/^(?:int|double|float|char|String|boolean|bool)\s+((?:\w+\s*,\s*)+\w+)$/, (_, names) => {
+      return names.split(",").map((name) => name.trim()).join(" = ") + " = 0";
+    });
+    line = line.replace(/^(?:int|double|float|char|String|boolean|bool)\s+(\w+)\s*=\s*(.*)$/, "$1 = $2");
+    line = line.replace(/^(?:int|double|float|char|String|boolean|bool)\[\]\s+(\w+)\s*=\s*\{(.*)\}$/, "$1 = [$2]");
+
+    if (line.endsWith("{")) {
+      line = line.slice(0, -1).trim() + ":";
+      output.push(`${"  ".repeat(indent)}${line}${comment ? ` ${comment}` : ""}`);
+      indent += 1;
+      previousWasHeader = true;
       continue;
     }
 
-    const converted = convertSimplePythonStatement(line, functionNames);
-    emit(`${converted}${comment ? ` ${comment}` : ""}`);
-    if (pendingSingleLineBlocks) {
-      indent = Math.max(0, indent - pendingSingleLineBlocks);
-      pendingSingleLineBlocks = 0;
+    if (line && line !== "}") {
+      output.push(`${"  ".repeat(indent)}${normalizeExpression(line, "Python")}${comment ? ` ${comment}` : ""}`);
+      previousWasHeader = false;
     }
   }
 
-  if (output.some((line) => /^def main\(\):$/.test(line.trim()))) {
+  if (output.some((line) => line.startsWith("def main():"))) {
     output.push("");
     output.push('if __name__ == "__main__":');
     output.push("  main()");
+  } else if (previousWasHeader) {
+    output.push("  pass");
   }
 
   return output.join("\n");
-}
-
-function convertSimplePythonStatement(line, functionNames = new Map()) {
-  const scanfLine = convertScanfToPython(line);
-  if (scanfLine) {
-    return scanfLine;
-  }
-
-  const printfLine = convertPrintfToPython(line);
-  if (printfLine) {
-    return printfLine;
-  }
-
-  const incrementMatch = line.match(/^([A-Za-z_]\w*)\+\+$/);
-  if (incrementMatch) {
-    return `${incrementMatch[1]} += 1`;
-  }
-
-  const decrementMatch = line.match(/^([A-Za-z_]\w*)--$/);
-  if (decrementMatch) {
-    return `${decrementMatch[1]} -= 1`;
-  }
-
-  let converted = line
-    .replace(/^return\s+(.+)$/, (_, value) => `return ${normalizeExpression(value, "Python")}`)
-    .replace(/^System\.out\.println\s*\((.*)\)$/, "print($1)")
-    .replace(/^Console\.WriteLine\s*\((.*)\)$/, "print($1)")
-    .replace(/^console\.log\s*\((.*)\)$/, "print($1)")
-    .replace(/\b(\w+)\.length\b/g, "len($1)")
-    .replace(/;$/, "");
-
-  for (const [sourceName, pythonName] of functionNames) {
-    if (sourceName !== pythonName) {
-      converted = converted.replace(new RegExp(`\\b${sourceName}\\s*\\(`, "g"), `${pythonName}(`);
-    }
-  }
-
-  const assignmentMatch = converted.match(/^(.+?)=\s*(.+)$/);
-  if (assignmentMatch && !/[!<>]=|==/.test(converted)) {
-    return `${assignmentMatch[1].trim()} = ${normalizeExpression(assignmentMatch[2], "Python")}`;
-  }
-
-  return normalizeExpression(converted, "Python");
 }
 
 function convertPrint(line, target) {
@@ -788,58 +467,21 @@ function toBraceLanguage(source, target) {
 }
 
 function translateCode(payload) {
-  const { sourceCode: source, sourceLanguage, targetLanguage: target, style, options = {} } = payload;
+  const { sourceCode: source, sourceLanguage, targetLanguage: target, style } = payload;
 
   if (!source.trim()) {
     return "Paste code first, then click Translate Code.";
   }
 
-  const pair = `${sourceLanguage}->${target}`;
-  const dependencies = getStandardDependencies(target);
-  const notes = buildCompatibilityNotes(sourceLanguage, target, "local");
-  let translated;
-
-  if (!localTranslationPairs.has(pair)) {
-    const unsupportedCode = [
-      `// Full ${sourceLanguage} to ${target} translation requires a backend transpilation/AI service.`,
-      `// Configure window.CODE_TRANSLATE_API_URL to enable the expert multilingual translator contract.`,
-      `// The original source is preserved below so no logic is silently mistranslated.`,
-      "",
-      source
-    ].join("\n");
-
-    return formatTranslationResult({
-      detected: sourceLanguage,
-      target,
-      dependencies,
-      notes: [
-        ...notes,
-        "This language pair is not handled by the local deterministic translator, so the app did not fabricate a runnable translation."
-      ],
-      code: unsupportedCode
-    });
-  }
-
   if (target === "Python") {
-    translated = toPython(source);
-  } else if (supportedBraceLanguages.has(target)) {
-    translated = toBraceLanguage(source, target);
-  } else {
-    translated = `// ${target} translation needs a backend AI model for full accuracy.\n// Detected source language: ${sourceLanguage}\n// Translation style: ${formatStyle(style)}\n\n${source}`;
+    return toPython(source);
   }
 
-  if (options.optimize) {
-    const optimization = analyzeOptimization(translated, target);
-    translated = optimization.optimized || translated;
+  if (supportedBraceLanguages.has(target)) {
+    return toBraceLanguage(source, target);
   }
 
-  return formatTranslationResult({
-    detected: sourceLanguage,
-    target,
-    dependencies,
-    notes,
-    code: translated
-  });
+  return `// ${target} translation needs a backend AI model for full accuracy.\n// Detected source language: ${sourceLanguage}\n// Translation style: ${formatStyle(style)}\n\n${source}`;
 }
 
 function normalizeCodeLayout(code, changes) {
@@ -1113,7 +755,7 @@ function analyzeOptimization(code, language) {
   if (changes.length === 0) {
     return {
       original: code,
-      optimized: normalizeCodeLayout(code, []),
+      optimized: "The code is totally optimized.",
       changes: ["The code is totally optimized."]
     };
   }
@@ -1195,72 +837,26 @@ function render() {
 }
 
 async function requestTranslation(payload) {
-  const endpoint = await resolveTranslationEndpoint();
+  const endpoint = window.CODE_TRANSLATE_API_URL;
 
-  let response;
-
-  try {
-    response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(buildExpertTranslationRequest(payload))
-    });
-  } catch {
-    throw new Error(`Translation backend is not reachable at ${endpoint}. Start it with npm start and make sure OPENAI_API_KEY is set.`);
+  if (!endpoint) {
+    return translateCode(payload);
   }
 
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    throw new Error(errorBody.error || `Translation API failed with status ${response.status}`);
+    throw new Error(`Translation API failed with status ${response.status}`);
   }
 
   const data = await response.json();
-  if (data.detectedLanguage || data.requiredDependencies || data.compatibilityNotes || data.translatedCode) {
-    return formatTranslationResult({
-      detected: data.detectedLanguage || payload.sourceLanguage,
-      target: payload.targetLanguage,
-      dependencies: data.requiredDependencies || getStandardDependencies(payload.targetLanguage),
-      notes: data.compatibilityNotes || ["Backend translation completed."],
-      code: data.translatedCode || data.output || ""
-    });
-  }
-
-  throw new Error("Translation API returned an unexpected response shape.");
-}
-
-async function resolveTranslationEndpoint() {
-  const cached = window.localStorage.getItem(endpointCacheKey);
-  const candidates = cached ? [cached, ...defaultBackendCandidates] : defaultBackendCandidates;
-
-  for (const endpoint of candidates) {
-    if (await probeBackend(endpoint)) {
-      window.localStorage.setItem(endpointCacheKey, endpoint);
-      return endpoint;
-    }
-  }
-
-  throw new Error(`Translation backend is not reachable. Tried: ${candidates.join(", ")}. Start the backend with npm start and make sure OPENAI_API_KEY is set.`);
-}
-
-async function probeBackend(endpoint) {
-  const healthUrl = endpoint.replace(/\/api\/translate$/, "/api/health");
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 1200);
-
-  try {
-    const response = await fetch(healthUrl, {
-      method: "GET",
-      signal: controller.signal
-    });
-
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
+  return data.translatedCode || data.output || "";
 }
 
 function translate() {
