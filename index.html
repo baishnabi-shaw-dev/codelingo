@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>CodeLingo Translator</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
@@ -28,7 +29,10 @@
                 <span aria-hidden="true">{} </span>
               </button>
             </div>
-            <textarea id="sourceCode" spellcheck="false" aria-label="Source code editor" placeholder="Paste Java, Python, JavaScript, C++, Kotlin, C#, PHP, Ruby, Go, or TypeScript code here..."></textarea>
+            <div class="code-editor-wrap">
+              <pre class="code-highlight" id="sourceHighlight" aria-hidden="true"><code class="language-auto" id="sourceHighlightCode"></code></pre>
+              <textarea id="sourceCode" spellcheck="false" aria-label="Source code editor" placeholder="Paste Java, Python, JavaScript, C++, Kotlin, C#, PHP, Ruby, Go, or TypeScript code here..." autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+            </div>
           </article>
 
           <aside class="panel controls-panel">
@@ -68,40 +72,44 @@
           </aside>
         </section>
 
-        <section class="result-grid">
-          <article class="panel">
-            <div class="panel-head compact">
-              <h2>Code Optimization</h2>
-              <button class="text-button" id="copyReportButton" type="button">Copy</button>
-            </div>
-            <div class="comparison-grid">
-              <section class="code-compare-block" aria-label="Original code">
-                <h3>Original Code</h3>
-                <pre class="code-output compare-output"><code id="originalCodeBlock">Paste code to compare optimization results.</code></pre>
-              </section>
-              <section class="code-compare-block" aria-label="Optimized code">
-                <h3>Optimized Code</h3>
-                <pre class="code-output compare-output optimized"><code id="optimizedCodeBlock">Optimized code will appear here.</code></pre>
-              </section>
-            </div>
-            <div class="optimization-notes">
-              <h3>Changes Made</h3>
-              <ul class="report-list" id="optimizationList"></ul>
-            </div>
-          </article>
-
+        <section class="result-grid" id="resultGrid">
           <article class="panel">
             <div class="panel-head compact">
               <h2>Translated Output</h2>
               <button class="text-button" id="copyOutputButton" type="button">Copy</button>
             </div>
-            <pre class="code-output"><code id="translatedOutput">Your translated code will appear here.</code></pre>
+            <div class="output-wrap">
+              <div class="translate-loader" id="translateLoader" aria-hidden="true">
+                <div class="loader">
+                  <div class="ring ring1"></div>
+                  <div class="ring ring2"></div>
+                  <div class="ring ring3"></div>
+                </div>
+              </div>
+              <pre class="code-output"><code id="translatedOutput">Your translated code will appear here.</code></pre>
+            </div>
+          </article>
+
+          <article class="panel" id="optimizationPanel">
+            <div class="panel-head compact">
+              <h2>Optimized Code</h2>
+              <button class="text-button" id="copyReportButton" type="button">Copy</button>
+            </div>
+            <pre class="code-output optimized-output"><code id="optimizedCodeBlock">Paste source code to see the optimized version.</code></pre>
+            <div class="optimization-notes">
+              <div class="optimization-notes-head">
+                <h3>Changes Made</h3>
+              </div>
+              <ul class="report-list" id="optimizationList"></ul>
+            </div>
           </article>
         </section>
 
       </section>
     </main>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

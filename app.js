@@ -29,13 +29,13 @@ const styleSelect = document.getElementById("styleSelect");
 const styleButtons = [...styleSelect.querySelectorAll(".mode-button")];
 const translateButton = document.getElementById("translateButton");
 const translatedOutput = document.getElementById("translatedOutput");
-const originalCodeBlock = document.getElementById("originalCodeBlock");
-const optimizedCodeBlock = document.getElementById("optimizedCodeBlock");
 const optimizationList = document.getElementById("optimizationList");
 const statusPill = document.getElementById("statusPill");
 const sampleButton = document.getElementById("sampleButton");
 const copyReportButton = document.getElementById("copyReportButton");
 const copyOutputButton = document.getElementById("copyOutputButton");
+const sourceHighlightCode = document.getElementById("sourceHighlightCode");
+const optimizedCodeBlock = document.getElementById("optimizedCodeBlock");
 let targetOptions = [];
 
 const defaultStyle = "production-ready";
@@ -46,6 +46,61 @@ const styleLabels = {
   "framework-neutral": "Neutral"
 };
 let selectedStyle = defaultStyle;
+
+// Map language names to Prism language identifiers
+const prismLangMap = {
+  Python: "python",
+  JavaScript: "javascript",
+  TypeScript: "typescript",
+  Java: "java",
+  Kotlin: "kotlin",
+  "C": "c",
+  "C++": "cpp",
+  "C#": "csharp",
+  Go: "go",
+  PHP: "php",
+  Ruby: "ruby",
+  Swift: "swift",
+  Rust: "rust"
+};
+
+function highlightCode(code, langName) {
+  const lang = prismLangMap[langName] || "plain";
+  if (!code || !window.Prism) return escapeHtml(code);
+  try {
+    const grammar = Prism.languages[lang];
+    if (grammar) return Prism.highlight(code, grammar, lang);
+    // Trigger autoloader then return escaped for now; will update on next input
+    if (Prism.plugins && Prism.plugins.autoloader) {
+      Prism.plugins.autoloader.loadLanguages([lang]);
+    }
+  } catch (_) { /* fall through */ }
+  return escapeHtml(code);
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function applySourceHighlight(code, langName) {
+  sourceHighlightCode.className = `language-${prismLangMap[langName] || "plain"}`;
+  sourceHighlightCode.innerHTML = highlightCode(code, langName);
+}
+
+function applyOutputHighlight(code, langName) {
+  const lang = prismLangMap[langName] || "plain";
+  translatedOutput.className = `language-${lang}`;
+  translatedOutput.innerHTML = highlightCode(code, langName);
+}
+
+function applyOptimizedHighlight(code, langName) {
+  const lang = prismLangMap[langName] || "plain";
+  optimizedCodeBlock.className = `language-${lang}`;
+  optimizedCodeBlock.innerHTML = highlightCode(code, langName);
+}
 
 const sampleJava = `public class Main {
   public static void main(String[] args) {
@@ -246,87 +301,232 @@ function toPython(source) {
   const output = [];
   let indent = 0;
   let previousWasHeader = false;
+  let inClass = false;
 
   for (const rawLine of source.split(linesPattern)) {
     let line = rawLine.trim();
 
-    if (!line || cLikeSkipPattern.test(line)) {
-      continue;
-    }
+    if (!line || cLikeSkipPattern.test(line)) continue;
 
     if (line.startsWith("}")) {
       indent = Math.max(0, indent - 1);
       line = line.replace(/^}+\s*/, "");
+      if (!line) continue;
     }
 
-    if (!line || classDeclarationPattern.test(line)) {
+    if (classDeclarationPattern.test(line)) {
+      // class Foo { or public class Foo extends Bar {
+      const classMatch = line.match(/(?:public\s+)?(?:abstract\s+)?class\s+(\w+)(?:\s+extends\s+(\w+))?(?:\s+implements\s+[\w,\s]+)?\s*\{?$/);
+      if (classMatch) {
+        const base = classMatch[2] ? `(${classMatch[2]})` : "";
+        output.push(`${"  ".repeat(indent)}class ${classMatch[1]}${base}:`);
+        indent += 1;
+        inClass = true;
+        previousWasHeader = true;
+        continue;
+      }
       continue;
     }
 
-    if (/main\s*\(/.test(line)) {
-      output.push("def main():");
-      indent = 1;
+    // interface → class (abstract base)
+    if (/^\s*(?:public\s+)?interface\s+(\w+)/.test(line)) {
+      const m = line.match(/interface\s+(\w+)/);
+      if (m) {
+        output.push(`${"  ".repeat(indent)}class ${m[1]}:`);
+        indent += 1;
+        previousWasHeader = true;
+        continue;
+      }
+    }
+
+    // Constructor
+    if (/^\s*(?:public\s+)?\w+\s*\(/.test(line) && inClass && !line.startsWith("if") && !line.startsWith("while") && !line.startsWith("for")) {
+      const ctorMatch = line.match(/^(?:public\s+)?(\w+)\s*\(([^)]*)\)\s*\{?$/);
+      if (ctorMatch && ctorMatch[1] === ctorMatch[1]) {
+        const params = convertParams(ctorMatch[2], "Python");
+        output.push(`${"  ".repeat(indent)}def __init__(self${params ? ", " + params : ""}):`);
+        indent += 1;
+        previousWasHeader = true;
+        continue;
+      }
+    }
+
+    // Method declarations: public int foo(int x) {
+    const methodMatch = line.match(/^(?:(?:public|private|protected|static|final|override|async)\s+)*(?:[\w<>\[\]]+\s+)?(\w+)\s*\(([^)]*)\)\s*(?:throws\s+\w+\s*)?\{?$/);
+    if (methodMatch && !line.startsWith("if") && !line.startsWith("while") && !line.startsWith("for") && !line.startsWith("switch")) {
+      const fnName = methodMatch[1];
+      const params = convertParams(methodMatch[2], "Python");
+      const isStatic = /\bstatic\b/.test(line);
+      const selfParam = inClass && !isStatic ? "self" + (params ? ", " + params : "") : params;
+      if (isStatic && inClass) {
+        output.push(`${"  ".repeat(indent)}@staticmethod`);
+        output.push(`${"  ".repeat(indent)}def ${fnName}(${params}):`);
+      } else {
+        output.push(`${"  ".repeat(indent)}def ${fnName}(${selfParam}):`);
+      }
+      indent += 1;
+      previousWasHeader = true;
+      continue;
+    }
+
+    if (/main\s*\(/.test(line) && !/\.\s*main/.test(line)) {
+      output.push(`${"  ".repeat(indent)}def main():`);
+      indent = indent + 1;
       previousWasHeader = true;
       continue;
     }
 
     const { code, comment } = stripComment(line);
-    line = code;
+    line = code.trim();
 
+    // for (int i = 0; i < n; i++)
     const forMatch = line.match(/^for\s*\(\s*(?:int\s+)?(\w+)\s*=\s*([^;]+);\s*\1\s*<\s*([^;]+);\s*\1\+\+\s*\)\s*\{?$/);
     if (forMatch) {
-      output.push(`${"  ".repeat(indent)}for ${forMatch[1]} in range(${normalizeExpression(forMatch[2], "Python")}, ${normalizeExpression(forMatch[3], "Python")}):`);
-      indent += 1;
-      previousWasHeader = true;
-      continue;
+      output.push(`${"  ".repeat(indent)}for ${forMatch[1]} in range(${normalizeExpression(forMatch[2].trim(), "Python")}, ${normalizeExpression(forMatch[3].trim(), "Python")}):`);
+      indent += 1; previousWasHeader = true; continue;
     }
 
-    const scanfLine = convertScanfToPython(line);
-    if (scanfLine) {
-      output.push(`${"  ".repeat(indent)}${scanfLine}${comment ? ` ${comment}` : ""}`);
-      previousWasHeader = false;
-      continue;
+    // for (Type item : collection)
+    const forEachMatch = line.match(/^for\s*\(\s*(?:\w+[\w<>, ]*)\s+(\w+)\s*:\s*(\w+[\w.]*)\s*\)\s*\{?$/);
+    if (forEachMatch) {
+      output.push(`${"  ".repeat(indent)}for ${forEachMatch[1]} in ${forEachMatch[2]}:`);
+      indent += 1; previousWasHeader = true; continue;
     }
 
-    const printfLine = convertPrintfToPython(line);
-    if (printfLine) {
-      output.push(`${"  ".repeat(indent)}${printfLine}${comment ? ` ${comment}` : ""}`);
-      previousWasHeader = false;
-      continue;
-    }
-
+    // while
     const whileMatch = line.match(/^while\s*\((.*)\)\s*\{?$/);
     if (whileMatch) {
       output.push(`${"  ".repeat(indent)}while ${normalizeExpression(whileMatch[1], "Python")}:`);
-      indent += 1;
-      previousWasHeader = true;
+      indent += 1; previousWasHeader = true; continue;
+    }
+
+    // do { → while True: (approximation)
+    if (/^do\s*\{?$/.test(line)) {
+      output.push(`${"  ".repeat(indent)}while True:`);
+      indent += 1; previousWasHeader = true; continue;
+    }
+
+    // if/else if/else
+    const ifMatch = line.match(/^(else\s+)?if\s*\((.*)\)\s*\{?$/);
+    if (ifMatch) {
+      const kw = ifMatch[1] ? "elif" : "if";
+      output.push(`${"  ".repeat(indent)}${kw} ${normalizeExpression(ifMatch[2], "Python")}:`);
+      indent += 1; previousWasHeader = true; continue;
+    }
+    if (/^else\s*\{?$/.test(line)) {
+      output.push(`${"  ".repeat(Math.max(0, indent - 1))}else:`);
+      previousWasHeader = true; continue;
+    }
+
+    // switch → if/elif chain (basic)
+    const switchMatch = line.match(/^switch\s*\((\w+)\)\s*\{?$/);
+    if (switchMatch) {
+      output.push(`${"  ".repeat(indent)}# switch ${switchMatch[1]}`);
+      previousWasHeader = true; continue;
+    }
+    const caseMatch = line.match(/^case\s+(.+):$/);
+    if (caseMatch) {
+      output.push(`${"  ".repeat(indent)}if ${output.length > 0 && output[output.length-1].includes("if ") ? "... == " : ""}${caseMatch[1]}:`);
+      previousWasHeader = true; continue;
+    }
+    if (/^default:$/.test(line)) {
+      output.push(`${"  ".repeat(indent)}else:`);
+      previousWasHeader = true; continue;
+    }
+
+    // try/catch/finally
+    if (/^try\s*\{?$/.test(line)) {
+      output.push(`${"  ".repeat(indent)}try:`);
+      indent += 1; previousWasHeader = true; continue;
+    }
+    const catchMatch = line.match(/^catch\s*\(([^)]*)\)\s*\{?$/);
+    if (catchMatch) {
+      const exType = catchMatch[1].split(" ")[0] || "Exception";
+      const exVar = catchMatch[1].split(" ")[1] || "e";
+      output.push(`${"  ".repeat(Math.max(0, indent - 1))}except ${exType} as ${exVar}:`);
+      previousWasHeader = true; continue;
+    }
+    if (/^finally\s*\{?$/.test(line)) {
+      output.push(`${"  ".repeat(Math.max(0, indent - 1))}finally:`);
+      previousWasHeader = true; continue;
+    }
+
+    // throw
+    if (/^throw\s+new\s+/.test(line)) {
+      output.push(`${"  ".repeat(indent)}raise ${line.replace(/^throw\s+new\s+/, "").replace(/;$/, "")}`);
       continue;
     }
 
+    // return
+    const returnMatch = line.match(/^return\s*(.*?);?$/);
+    if (returnMatch && !line.startsWith("//")) {
+      output.push(`${"  ".repeat(indent)}return ${normalizeExpression(returnMatch[1], "Python")}`);
+      previousWasHeader = false; continue;
+    }
+
+    const scanfLine = convertScanfToPython(line);
+    if (scanfLine) { output.push(`${"  ".repeat(indent)}${scanfLine}${comment ? ` ${comment}` : ""}`); previousWasHeader = false; continue; }
+
+    const printfLine = convertPrintfToPython(line);
+    if (printfLine) { output.push(`${"  ".repeat(indent)}${printfLine}${comment ? ` ${comment}` : ""}`); previousWasHeader = false; continue; }
+
     line = line
       .replace(/^System\.out\.println\s*\((.*)\);?$/, "print($1)")
+      .replace(/^System\.out\.print\s*\((.*)\);?$/, "print($1, end='')")
       .replace(/^Console\.WriteLine\s*\((.*)\);?$/, "print($1)")
+      .replace(/^Console\.Write\s*\((.*)\);?$/, "print($1, end='')")
       .replace(/^console\.log\s*\((.*)\);?$/, "print($1)")
       .replace(/^printf\s*\("([^"]*)\\n"\s*\);?$/, 'print("$1")')
-      .replace(/^printf\s*\("([^"]*)"\s*\);?$/, 'print("$1")')
+      .replace(/^printf\s*\("([^"]*)"\s*\);?$/, 'print("$1", end="")')
       .replace(/^printf\s*\((.*)\);?$/, "print($1)")
+      .replace(/^fmt\.Println\s*\((.*)\);?$/, "print($1)")
+      .replace(/^puts\s+(.*);?$/, "print($1)")
+      .replace(/^echo\s+(.*);?$/, "print($1)")
+      .replace(/\bnew\s+ArrayList\s*<[^>]*>\s*\(\)/g, "[]")
+      .replace(/\bnew\s+HashMap\s*<[^>]*>\s*\(\)/g, "{}")
+      .replace(/\bnew\s+HashSet\s*<[^>]*>\s*\(\)/g, "set()")
+      .replace(/(\w+)\.add\((.+)\)/g, "$1.append($2)")
+      .replace(/(\w+)\.size\(\)/g, "len($1)")
+      .replace(/(\w+)\.get\((.+)\)/g, "$1[$2]")
+      .replace(/(\w+)\.put\((.+),\s*(.+)\)/g, "$1[$2] = $3")
+      .replace(/(\w+)\.containsKey\((.+)\)/g, "$2 in $1")
+      .replace(/(\w+)\.contains\((.+)\)/g, "$2 in $1")
+      .replace(/(\w+)\.toUpperCase\(\)/g, "$1.upper()")
+      .replace(/(\w+)\.toLowerCase\(\)/g, "$1.lower()")
+      .replace(/(\w+)\.trim\(\)/g, "$1.strip()")
+      .replace(/(\w+)\.length\(\)/g, "len($1)")
       .replace(/\b(\w+)\.length\b/g, "len($1)")
+      .replace(/(\w+)\.substring\((\d+),\s*(\d+)\)/g, "$1[$2:$3]")
+      .replace(/(\w+)\.charAt\((\d+)\)/g, "$1[$2]")
+      .replace(/(\w+)\.indexOf\((.+)\)/g, "$1.index($2)")
+      .replace(/(\w+)\.split\((.+)\)/g, "$1.split($2)")
+      .replace(/(\w+)\.replace\((.+),\s*(.+)\)/g, "$1.replace($2, $3)")
+      .replace(/Integer\.parseInt\((.+)\)/g, "int($1)")
+      .replace(/Double\.parseDouble\((.+)\)/g, "float($1)")
+      .replace(/String\.valueOf\((.+)\)/g, "str($1)")
+      .replace(/Math\.max\((.+),\s*(.+)\)/g, "max($1, $2)")
+      .replace(/Math\.min\((.+),\s*(.+)\)/g, "min($1, $2)")
+      .replace(/Math\.abs\((.+)\)/g, "abs($1)")
+      .replace(/Math\.sqrt\((.+)\)/g, "math.sqrt($1)")
+      .replace(/Math\.pow\((.+),\s*(.+)\)/g, "$1 ** $2")
+      .replace(/Math\.floor\((.+)\)/g, "math.floor($1)")
+      .replace(/Math\.ceil\((.+)\)/g, "math.ceil($1)")
       .replace(/;$/, "");
 
-    line = line.replace(/^(?:int|double|float)\s+(\w+)\[(\d+)\]\[(\d+)\]$/, "$1 = [[0 for _ in range($3)] for _ in range($2)]");
-    line = line.replace(/^(?:int|double|float)\s+(\w+)\[(\d+)\]$/, "$1 = [0 for _ in range($2)]");
-    line = line.replace(/^(?:int|double|float|char|String|boolean|bool)\s+((?:\w+\s*,\s*)+\w+)$/, (_, names) => {
-      return names.split(",").map((name) => name.trim()).join(" = ") + " = 0";
-    });
-    line = line.replace(/^(?:int|double|float|char|String|boolean|bool)\s+(\w+)\s*=\s*(.*)$/, "$1 = $2");
-    line = line.replace(/^(?:int|double|float|char|String|boolean|bool)\[\]\s+(\w+)\s*=\s*\{(.*)\}$/, "$1 = [$2]");
+    line = line
+      .replace(/^(?:int|long|double|float)\s+(\w+)\[(\d+)\]\[(\d+)\]$/, "$1 = [[0]*$3 for _ in range($2)]")
+      .replace(/^(?:int|long|double|float)\s+(\w+)\[(\d+)\]$/, "$1 = [0] * $2")
+      .replace(/^(?:int|long|double|float|char|String|string|boolean|bool)\s+((?:\w+\s*,\s*)+\w+)$/, (_, names) =>
+        names.split(",").map(n => n.trim()).join(" = ") + " = 0")
+      .replace(/^(?:int|long|double|float|char|String|string|boolean|bool)\s+(\w+)\s*=\s*(.*)$/, "$1 = $2")
+      .replace(/^(?:int|long|double|float|char|String|string|boolean|bool)\[\]\s+(\w+)\s*=\s*\{(.*)\}$/, "$1 = [$2]")
+      .replace(/^(?:List|ArrayList)<\w+>\s+(\w+)\s*=.*$/, "$1 = []")
+      .replace(/^(?:Map|HashMap)<\w+,\s*\w+>\s+(\w+)\s*=.*$/, "$1 = {}");
 
     if (line.endsWith("{")) {
       line = line.slice(0, -1).trim() + ":";
       output.push(`${"  ".repeat(indent)}${line}${comment ? ` ${comment}` : ""}`);
-      indent += 1;
-      previousWasHeader = true;
-      continue;
+      indent += 1; previousWasHeader = true; continue;
     }
 
     if (line && line !== "}") {
@@ -335,15 +535,22 @@ function toPython(source) {
     }
   }
 
-  if (output.some((line) => line.startsWith("def main():"))) {
-    output.push("");
-    output.push('if __name__ == "__main__":');
-    output.push("  main()");
+  if (output.some(l => l.trimStart().startsWith("def main():"))) {
+    output.push(""); output.push('if __name__ == "__main__":'); output.push("  main()");
   } else if (previousWasHeader) {
-    output.push("  pass");
+    output.push(`${"  ".repeat(indent)}pass`);
   }
 
   return output.join("\n");
+}
+
+function convertParams(paramStr, target) {
+  if (!paramStr || !paramStr.trim()) return "";
+  return paramStr.split(",").map(p => {
+    const parts = p.trim().split(/\s+/);
+    if (target === "Python") return parts[parts.length - 1] || p.trim();
+    return p.trim();
+  }).join(", ");
 }
 
 function convertPrint(line, target) {
@@ -403,85 +610,432 @@ function convertDeclaration(line, target) {
 function toBraceLanguage(source, target) {
   const output = [];
   const isJsLike = target === "JavaScript" || target === "TypeScript";
+  const isKotlin = target === "Kotlin";
+  const isRust = target === "Rust";
+  const isGo = target === "Go";
+  const isCSharp = target === "C#";
+  const isJava = target === "Java";
+  const isC = target === "C";
+  const isCpp = target === "C++";
 
-  if (target === "C++") output.push("#include <iostream>", "#include <vector>", "");
-  if (target === "C") output.push("#include <stdio.h>", "");
-  if (target === "Go") output.push("package main", "", 'import "fmt"', "");
-  if (target === "C#") output.push("using System;", "");
-  if (target === "Java") output.push("public class Main {");
+  // File headers
+  if (isCpp) output.push("#include <iostream>", "#include <vector>", "#include <string>", "#include <map>", "");
+  if (isC) output.push("#include <stdio.h>", "#include <stdlib.h>", "#include <string.h>", "");
+  if (isGo) output.push("package main", "", 'import "fmt"', "");
+  if (isCSharp) output.push("using System;", "using System.Collections.Generic;", "");
+  if (isJava) output.push("import java.util.*;", "", "public class Main {");
+
+  let indentLevel = isJava ? 1 : 0;
+  const pad = (n) => "  ".repeat(n);
 
   for (const rawLine of source.split(linesPattern)) {
-    let line = rawLine.trim();
+    const line = rawLine.trim();
+    if (!line || cLikeSkipPattern.test(line)) continue;
+    if (/^(?:from|import)\s+\w/.test(line) && !isGo) continue; // Python imports
 
-    if (!line || cLikeSkipPattern.test(line) || /^public\s+class\b/.test(line)) {
+    const { code: lineCode, comment } = stripComment(line);
+    const lc = lineCode.trim();
+    if (!lc) { if (comment) output.push(pad(indentLevel) + comment); continue; }
+
+    const commentSuffix = comment ? ` ${isJsLike || isJava || isCpp || isC || isCSharp || isGo || isRust ? "//" + comment.replace(/^#\s*/, " ") : comment}` : "";
+
+    // ── class declarations ─────────────────────────────
+    const classMatch = lc.match(/^(?:(?:public|private|abstract)\s+)*class\s+(\w+)(?:\s*[\(:]\s*(\w+))?/);
+    if (classMatch) {
+      const name = classMatch[1];
+      const base = classMatch[2];
+      if (isJava) output.push(`${pad(indentLevel)}public class ${name}${base ? " extends " + base : ""} {`);
+      else if (isCSharp) output.push(`${pad(indentLevel)}public class ${name}${base ? " : " + base : ""} {`);
+      else if (isKotlin) output.push(`${pad(indentLevel)}class ${name}${base ? "(" + base + ")" : ""} {`);
+      else if (isCpp) output.push(`${pad(indentLevel)}class ${name}${base ? " : public " + base : ""} {`);
+      else if (isJsLike) output.push(`${pad(indentLevel)}class ${name}${base ? " extends " + base : ""} {`);
+      else output.push(`${pad(indentLevel)}// class ${name}`);
+      indentLevel++;
       continue;
     }
 
-    if (/main\s*\(/.test(line) || line === 'if __name__ == "__main__":' || line === "main()") {
-      if (target === "Java") output.push("  public static void main(String[] args) {");
-      else if (target === "Kotlin") output.push("fun main() {");
-      else if (target === "C#") output.push("class Program {", "  static void Main() {");
-      else if (target === "Go") output.push("func main() {");
-      else if (target === "Rust") output.push("fn main() {");
-      else output.push("int main() {");
+    // ── function/method declarations ───────────────────
+    const funcMatch = lc.match(/^def\s+(\w+)\s*\(([^)]*)\)(?:\s*->\s*[\w\[\], ]+)?:$/);
+    if (funcMatch) {
+      const fname = funcMatch[1];
+      const rawParams = funcMatch[2].replace(/self,?\s*/, "").trim();
+      const params = convertParamsToTarget(rawParams, target);
+      if (fname === "__init__") {
+        if (isJava) output.push(`${pad(indentLevel)}public ${getClassName(output) || "Main"}(${params}) {`);
+        else if (isCSharp) output.push(`${pad(indentLevel)}public ${getClassName(output) || "Program"}(${params}) {`);
+        else if (isKotlin) output.push(`${pad(indentLevel)}constructor(${params}) {`);
+        else if (isCpp) output.push(`${pad(indentLevel)}${getClassName(output) || "MyClass"}(${params}) {`);
+        else if (isJsLike) output.push(`${pad(indentLevel)}constructor(${params}) {`);
+        else output.push(`${pad(indentLevel)}// constructor`);
+      } else {
+        const ret = fname === "main" ? (isC || isCpp ? "int" : isJava ? "void" : isGo ? "" : "") : "auto";
+        if (isJava) output.push(`${pad(indentLevel)}public static void ${fname}(${params}) {`);
+        else if (isCSharp) output.push(`${pad(indentLevel)}public static void ${fname}(${params}) {`);
+        else if (isKotlin) output.push(`${pad(indentLevel)}fun ${fname}(${params}) {`);
+        else if (isGo) output.push(`${pad(indentLevel)}func ${fname}(${params}) {`);
+        else if (isRust) output.push(`${pad(indentLevel)}fn ${fname}(${params}) {`);
+        else if (isCpp || isC) output.push(`${pad(indentLevel)}void ${fname}(${params}) {`);
+        else if (isJsLike) output.push(`${pad(indentLevel)}function ${fname}(${params}) {`);
+        else output.push(`${pad(indentLevel)}// fn ${fname}`);
+      }
+      indentLevel++;
       continue;
     }
 
-    const printLine = convertPrint(line, target);
-    if (printLine) {
-      output.push(`  ${printLine}`);
+    // ── main entry point ───────────────────────────────
+    if (/^(?:if\s+__name__\s*==\s*["']__main__["']:|main\(\))/.test(lc)) {
+      if (isJava) output.push(`${pad(indentLevel)}public static void main(String[] args) {`);
+      else if (isCSharp) output.push(`${pad(indentLevel)}static void Main(string[] args) {`);
+      else if (isKotlin) output.push(`${pad(indentLevel)}fun main() {`);
+      else if (isGo) output.push(`${pad(indentLevel)}func main() {`);
+      else if (isRust) output.push(`${pad(indentLevel)}fn main() {`);
+      else if (isC || isCpp) output.push(`${pad(indentLevel)}int main() {`);
+      else if (isJsLike) output.push(`${pad(indentLevel)}function main() {`);
+      indentLevel++;
       continue;
     }
 
-    const forPython = line.match(/^for\s+(\w+)\s+in\s+range\((.*?),(.*?)\):$/);
-    if (forPython) {
-      const keyword = isJsLike ? "let " : "int ";
-      output.push(`  for (${keyword}${forPython[1]} = ${forPython[2].trim()}; ${forPython[1]} < ${forPython[3].trim()}; ${forPython[1]}++) {`);
+    // ── control flow ───────────────────────────────────
+    const ifMatch = lc.match(/^(elif|if|else if)\s+(.+):$/);
+    if (ifMatch) {
+      const kw = ifMatch[1] === "elif" ? "else if" : ifMatch[1];
+      const cond = normalizeExpression(ifMatch[2], target);
+      if (isKotlin || isRust || isGo || isJsLike || isJava || isCSharp || isCpp || isC)
+        output.push(`${pad(indentLevel)}${kw} (${cond}) {`);
+      indentLevel++;
+      continue;
+    }
+    if (/^if\s+.+:$/.test(lc)) {
+      const cond = normalizeExpression(lc.replace(/^if\s+/, "").replace(/:$/, ""), target);
+      output.push(`${pad(indentLevel)}if (${cond}) {`);
+      indentLevel++;
+      continue;
+    }
+    if (/^else:$/.test(lc)) {
+      output.push(`${pad(Math.max(0, indentLevel - 1))}} else {`);
       continue;
     }
 
-    const declaration = convertDeclaration(line, target);
-    if (declaration !== line) {
-      output.push(`  ${declaration}`);
+    // Python for/while
+    const forPyRange = lc.match(/^for\s+(\w+)\s+in\s+range\(\s*(\S+?)\s*(?:,\s*(\S+?))?\s*\):$/);
+    if (forPyRange) {
+      const v = forPyRange[1], start = forPyRange[3] ? forPyRange[2] : "0", end = forPyRange[3] || forPyRange[2];
+      const kw = isJsLike ? "let" : isKotlin ? "var" : "int";
+      if (isKotlin) output.push(`${pad(indentLevel)}for (${v} in ${start} until ${end}) {`);
+      else if (isRust) output.push(`${pad(indentLevel)}for ${v} in ${start}..${end} {`);
+      else output.push(`${pad(indentLevel)}for (${kw} ${v} = ${start}; ${v} < ${end}; ${v}++) {`);
+      indentLevel++;
+      continue;
+    }
+    const forPyIn = lc.match(/^for\s+(\w+)\s+in\s+(.+):$/);
+    if (forPyIn) {
+      const v = forPyIn[1], col = forPyIn[2];
+      if (isJava) output.push(`${pad(indentLevel)}for (var ${v} : ${col}) {`);
+      else if (isCSharp) output.push(`${pad(indentLevel)}foreach (var ${v} in ${col}) {`);
+      else if (isKotlin) output.push(`${pad(indentLevel)}for (${v} in ${col}) {`);
+      else if (isRust) output.push(`${pad(indentLevel)}for ${v} in ${col}.iter() {`);
+      else if (isGo) output.push(`${pad(indentLevel)}for _, ${v} := range ${col} {`);
+      else if (isJsLike) output.push(`${pad(indentLevel)}for (const ${v} of ${col}) {`);
+      else output.push(`${pad(indentLevel)}for (auto ${v} : ${col}) {`);
+      indentLevel++;
+      continue;
+    }
+    const whilePy = lc.match(/^while\s+(.+):$/);
+    if (whilePy) {
+      output.push(`${pad(indentLevel)}while (${normalizeExpression(whilePy[1], target)}) {`);
+      indentLevel++;
       continue;
     }
 
-    if (line === "}" || line === "{") {
-      output.push(line);
+    // try/except/finally
+    if (/^try:$/.test(lc)) { output.push(`${pad(indentLevel)}try {`); indentLevel++; continue; }
+    const exceptMatch = lc.match(/^except(?:\s+(\w+)(?:\s+as\s+(\w+))?)?:$/);
+    if (exceptMatch) {
+      const exc = exceptMatch[1] || "Exception";
+      const evar = exceptMatch[2] || "e";
+      if (isJava || isCSharp || isCpp || isC) output.push(`${pad(Math.max(0,indentLevel-1))}} catch (${exc} ${evar}) {`);
+      else if (isKotlin) output.push(`${pad(Math.max(0,indentLevel-1))}} catch (${evar}: ${exc}) {`);
+      else if (isRust) output.push(`${pad(Math.max(0,indentLevel-1))}} // catch`);
+      else output.push(`${pad(Math.max(0,indentLevel-1))}} catch (${evar}) {`);
+      continue;
+    }
+    if (/^finally:$/.test(lc)) { output.push(`${pad(Math.max(0,indentLevel-1))}} finally {`); continue; }
+
+    // raise → throw
+    const raiseMatch = lc.match(/^raise\s+(.*)/);
+    if (raiseMatch) {
+      const semi = noSemicolonLanguages.has(target) ? "" : ";";
+      output.push(`${pad(indentLevel)}throw new ${raiseMatch[1]}${semi}`);
       continue;
     }
 
-    if (!line.endsWith(";") && !line.endsWith("{") && !line.endsWith("}") && !noSemicolonLanguages.has(target)) {
-      line += ";";
+    // return
+    const retPy = lc.match(/^return\s*(.*)/);
+    if (retPy && !lc.startsWith("//")) {
+      const val = normalizeExpression(retPy[1], target);
+      const semi = noSemicolonLanguages.has(target) ? "" : ";";
+      output.push(`${pad(indentLevel)}return ${val}${semi}${commentSuffix}`);
+      continue;
     }
 
-    output.push(`  ${normalizeExpression(line, target)}`);
+    // pass → {}
+    if (/^pass$/.test(lc)) { continue; }
+
+    // print statement
+    const printLine = convertPrint(lc, target);
+    if (printLine) { output.push(`${pad(indentLevel)}${printLine}${commentSuffix}`); continue; }
+
+    // Variable declarations (Python: x = val  or  x: type = val)
+    const pyVarDecl = lc.match(/^(\w+)\s*(?::\s*[\w\[\], ]+)?\s*=\s*(.+)$/);
+    if (pyVarDecl && !lc.includes("==") && !lc.startsWith("if ") && !lc.startsWith("elif ") && !lc.startsWith("while ")) {
+      const converted = convertDeclaration(lc, target);
+      if (converted !== lc) { output.push(`${pad(indentLevel)}${converted}${commentSuffix}`); continue; }
+    }
+
+    // C-style for loop pass-through
+    const forC = lc.match(/^for\s*\(/);
+    if (forC) { output.push(`${pad(indentLevel)}${ensureSemi(lc, target)}${commentSuffix}`); indentLevel++; continue; }
+
+    // Generic declaration conversion
+    const decl = convertDeclaration(lc, target);
+    if (decl !== lc) { output.push(`${pad(indentLevel)}${decl}${commentSuffix}`); continue; }
+
+    // Closing braces from Python dedent (handled by indentLevel)
+    if (lc === "}" || lc === "{") { output.push(lc); continue; }
+
+    // Default: emit with semicolon if needed
+    output.push(`${pad(indentLevel)}${ensureSemi(lc, target)}${commentSuffix}`);
   }
 
-  if (target === "Java") output.push("  }", "}");
-  else if (target === "C#") output.push("  }", "}");
-  else if (cLikeReturnLanguages.has(target)) output.push("  return 0;", "}");
-  else if (singleClosingBraceLanguages.has(target)) output.push("}");
+  // Close Java outer class
+  if (isJava) { output.push("  }"); output.push("}"); }
+  else if (isCSharp) { output.push("  }"); output.push("}"); }
+  else if (isC || isCpp) { output.push("  return 0;"); output.push("}"); }
+  else if (isKotlin || isGo || isRust) { output.push("}"); }
 
   return output.join("\n");
 }
 
+function getClassName(outputLines) {
+  for (let i = outputLines.length - 1; i >= 0; i--) {
+    const m = outputLines[i].match(/class\s+(\w+)/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+function convertParamsToTarget(paramStr, target) {
+  if (!paramStr.trim()) return "";
+  return paramStr.split(",").map(p => {
+    const name = p.trim().split(/\s+/).pop();
+    if (target === "TypeScript") return `${name}: any`;
+    if (target === "Java") return `Object ${name}`;
+    if (target === "C#") return `object ${name}`;
+    if (target === "C++" || target === "C") return `auto ${name}`;
+    if (target === "Kotlin") return `${name}: Any`;
+    if (target === "Rust") return `${name}: i32`;
+    if (target === "Go") return `${name} interface{}`;
+    return name;
+  }).join(", ");
+}
+
+function ensureSemi(line, target) {
+  if (noSemicolonLanguages.has(target)) return line;
+  if (line.endsWith(";") || line.endsWith("{") || line.endsWith("}") || line.endsWith(":")) return line;
+  return line + ";";
+}
+
 function translateCode(payload) {
-  const { sourceCode: source, sourceLanguage, targetLanguage: target, style } = payload;
+  const { sourceCode: source, sourceLanguage, targetLanguage: target, style, options } = payload;
+  const addComments = options && options.addComments;
 
   if (!source.trim()) {
     return "Paste code first, then click Translate Code.";
   }
 
+  let result;
+
   if (target === "Python") {
-    return toPython(source);
+    result = toPython(source);
+  } else if (supportedBraceLanguages.has(target)) {
+    result = toBraceLanguage(source, target);
+  } else if (target === "Ruby") {
+    result = toRuby(source);
+  } else if (target === "PHP") {
+    result = toPHP(source);
+  } else if (target === "Swift") {
+    result = toSwift(source);
+  } else {
+    result = `# ${target} translation\n# Source: ${sourceLanguage} | Style: ${formatStyle(style)}\n\n${source}`;
   }
 
-  if (supportedBraceLanguages.has(target)) {
-    return toBraceLanguage(source, target);
+  if (addComments) {
+    result = injectComments(result, target, sourceLanguage, style);
   }
 
-  return `// ${target} translation needs a backend AI model for full accuracy.\n// Detected source language: ${sourceLanguage}\n// Translation style: ${formatStyle(style)}\n\n${source}`;
+  return result;
+}
+
+function injectComments(code, target, sourceLanguage, style) {
+  const isHash = target === "Python" || target === "Ruby";
+  const c = isHash ? "#" : "//";
+  const lines = code.split(linesPattern);
+
+  const header = [
+    `${c} Translated from ${sourceLanguage} to ${target}`,
+    `${c} Style: ${formatStyle(style)}`,
+    `${c} Generated by CodeLingo`,
+    ""
+  ];
+
+  const annotated = lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith(c) || trimmed.startsWith("/*") || trimmed.startsWith("*")) return line;
+
+    // Function / method definition
+    if (/^(def |func |function |fun |fn )/.test(trimmed) ||
+        (/^(public|private|protected|static)\s/.test(trimmed) && (trimmed.endsWith("{") || trimmed.endsWith(":")))) {
+      const nameMatch = trimmed.match(/(?:def|func|function|fun|fn)\s+(\w+)/);
+      const name = nameMatch ? nameMatch[1] : "method";
+      return `${line}  ${c} ${name}() — translated from ${sourceLanguage}`;
+    }
+
+    // Loops
+    if (/^(for |while |foreach )/.test(trimmed)) {
+      return `${line}  ${c} loop`;
+    }
+
+    // Conditionals
+    if (/^(if |} else if |else if |elif |} else|else:)/.test(trimmed)) {
+      return `${line}  ${c} condition`;
+    }
+
+    // Return
+    if (/^return /.test(trimmed)) {
+      return `${line}  ${c} return value`;
+    }
+
+    // Print / output
+    if (/^(print|console\.log|System\.out|fmt\.Print|puts|echo|println)/.test(trimmed)) {
+      return `${line}  ${c} output`;
+    }
+
+    // Variable declaration / assignment (only simple ones)
+    if ((/^(const |let |var |int |double |float |string |bool |auto |val )/.test(trimmed) ||
+         /^\w+\s*=\s*/.test(trimmed)) && !trimmed.includes("==") && !trimmed.startsWith("if ")) {
+      return `${line}  ${c} variable`;
+    }
+
+    return line;
+  });
+
+  return [...header, ...annotated].join("\n");
+}
+
+function toRuby(source) {
+  const out = [];
+  for (const rawLine of source.split(linesPattern)) {
+    let line = rawLine.trim();
+    if (!line || cLikeSkipPattern.test(line)) continue;
+    if (line.startsWith("}")) { out.push("end"); continue; }
+    if (classDeclarationPattern.test(line)) {
+      const m = line.match(/class\s+(\w+)/);
+      out.push(`class ${m ? m[1] : "MyClass"}`); continue;
+    }
+    const funcMatch = line.match(/^def\s+(\w+)\s*\(([^)]*)\)/);
+    if (funcMatch) { out.push(`def ${funcMatch[1]}(${convertParams(funcMatch[2].replace(/self,?\s*/,""), "Ruby")})`); continue; }
+    const methodMatch = line.match(/^(?:(?:public|private|static)\s+)*\w+\s+(\w+)\s*\(([^)]*)\)\s*\{?$/);
+    if (methodMatch && !line.startsWith("if") && !line.startsWith("for") && !line.startsWith("while")) {
+      out.push(`def ${methodMatch[1]}(${convertParams(methodMatch[2], "Ruby")})`); continue;
+    }
+    if (/main\s*\(/.test(line)) continue;
+    line = line
+      .replace(/^System\.out\.println\s*\((.*)\);?$/, "puts $1")
+      .replace(/^console\.log\s*\((.*)\);?$/, "puts $1")
+      .replace(/^print\s*\((.*)\)$/, "puts $1")
+      .replace(/^fmt\.Println\s*\((.*)\);?$/, "puts $1")
+      .replace(/\bnew\s+ArrayList\s*<[^>]*>\s*\(\)/g, "[]")
+      .replace(/\bnew\s+HashMap\s*<[^>]*>\s*\(\)/g, "{}")
+      .replace(/\.size\(\)/g, ".length")
+      .replace(/\.add\(/g, ".push(")
+      .replace(/\.get\((.+)\)/g, "[$1]")
+      .replace(/Integer\.parseInt\((.+)\)/g, "$1.to_i")
+      .replace(/Double\.parseDouble\((.+)\)/g, "$1.to_f")
+      .replace(/String\.valueOf\((.+)\)/g, "$1.to_s")
+      .replace(/;$/, "")
+      .replace(/^(?:int|double|float|char|String|boolean|bool)\s+(\w+)\s*=\s*(.*)$/, "$1 = $2");
+    const ifM = line.match(/^(?:else\s+)?if\s*\((.*)\)/);
+    if (ifM) { out.push(line.includes("else") ? `elsif ${ifM[1]}` : `if ${ifM[1]}`); continue; }
+    if (/^else/.test(line)) { out.push("else"); continue; }
+    if (/^return\s/.test(line)) { out.push(line.replace(/;$/, "")); continue; }
+    out.push(line.replace(/;$/, ""));
+  }
+  return out.join("\n");
+}
+
+function toPHP(source) {
+  const out = ["<?php"];
+  for (const rawLine of source.split(linesPattern)) {
+    let line = rawLine.trim();
+    if (!line || cLikeSkipPattern.test(line)) continue;
+    if (classDeclarationPattern.test(line)) { out.push(line.replace(/^public\s+/, "")); continue; }
+    const methodMatch = line.match(/^(?:(?:public|private|protected|static)\s+)*(?:\w+\s+)?(\w+)\s*\(([^)]*)\)\s*\{?$/);
+    if (methodMatch && !line.startsWith("if") && !line.startsWith("for") && !line.startsWith("while")) {
+      out.push(`function ${methodMatch[1]}(${convertParams(methodMatch[2], "PHP")}) {`); continue;
+    }
+    line = line
+      .replace(/^System\.out\.println\s*\((.*)\);?$/, "echo $1;")
+      .replace(/^console\.log\s*\((.*)\);?$/, "echo $1;")
+      .replace(/^print\s*\((.*)\)$/, "echo $1;")
+      .replace(/\bnew\s+ArrayList\s*<[^>]*>\s*\(\)/g, "[]")
+      .replace(/\bnew\s+HashMap\s*<[^>]*>\s*\(\)/g, "[]")
+      .replace(/^(?:int|double|float|char|String|boolean|bool)\s+(\w+)\s*=\s*(.*)$/, (_, n, v) => `$${n} = ${v};`)
+      .replace(/\b([A-Za-z_]\w*)\b(?!\s*\(|\s*:)/g, (m) => ["true","false","null","return","if","else","for","while","foreach","echo","new","class","function","public","private","protected","static","void","int","string","float","bool","array","echo"].includes(m) ? m : (m.length > 1 ? `$${m}` : m));
+    if (!line.endsWith(";") && !line.endsWith("{") && !line.endsWith("}")) line += ";";
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+function toSwift(source) {
+  const out = [];
+  for (const rawLine of source.split(linesPattern)) {
+    let line = rawLine.trim();
+    if (!line || cLikeSkipPattern.test(line)) continue;
+    if (line.startsWith("}")) { out.push("}"); continue; }
+    if (classDeclarationPattern.test(line)) {
+      const m = line.match(/class\s+(\w+)(?:\s+extends\s+(\w+))?/);
+      out.push(`class ${m ? m[1] : "MyClass"}${m && m[2] ? " : " + m[2] : ""} {`); continue;
+    }
+    const funcMatch = line.match(/^def\s+(\w+)\s*\(([^)]*)\)/);
+    if (funcMatch) { out.push(`func ${funcMatch[1]}(${convertParams(funcMatch[2].replace(/self,?\s*/,""), "Swift")}) {`); continue; }
+    const methodMatch = line.match(/^(?:(?:public|private|static)\s+)*(?:\w+\s+)?(\w+)\s*\(([^)]*)\)\s*\{?$/);
+    if (methodMatch && !line.startsWith("if") && !line.startsWith("for") && !line.startsWith("while")) {
+      out.push(`func ${methodMatch[1]}(${convertParams(methodMatch[2], "Swift")}) {`); continue;
+    }
+    if (/main\s*\(/.test(line) && !/\./.test(line)) continue;
+    line = line
+      .replace(/^System\.out\.println\s*\((.*)\);?$/, "print($1)")
+      .replace(/^console\.log\s*\((.*)\);?$/, "print($1)")
+      .replace(/^puts\s+(.*);?$/, "print($1)")
+      .replace(/^fmt\.Println\s*\((.*)\);?$/, "print($1)")
+      .replace(/\bnew\s+ArrayList\s*<[^>]*>\s*\(\)/g, "[]")
+      .replace(/\bnew\s+HashMap\s*<[^>]*>\s*\(\)/g, "[:]")
+      .replace(/\.add\(/g, ".append(")
+      .replace(/\.size\(\)/g, ".count")
+      .replace(/Integer\.parseInt\((.+)\)/g, "Int($1)!")
+      .replace(/Double\.parseDouble\((.+)\)/g, "Double($1)!")
+      .replace(/^(?:int|long)\s+(\w+)\s*=\s*(.*)$/, "var $1: Int = $2")
+      .replace(/^(?:double|float)\s+(\w+)\s*=\s*(.*)$/, "var $1: Double = $2")
+      .replace(/^(?:String|string)\s+(\w+)\s*=\s*(.*)$/, "var $1: String = $2")
+      .replace(/^(?:boolean|bool)\s+(\w+)\s*=\s*(.*)$/, "var $1: Bool = $2")
+      .replace(/;$/, "");
+    const ifM = line.match(/^(?:else\s+)?if\s*\((.*)\)\s*\{?$/);
+    if (ifM) { out.push(`${line.includes("else") ? "} else if" : "if"} ${ifM[1]} {`); continue; }
+    if (/^else\s*\{?$/.test(line)) { out.push("} else {"); continue; }
+    out.push(line);
+  }
+  return out.join("\n");
 }
 
 function normalizeCodeLayout(code, changes) {
@@ -769,46 +1323,13 @@ function analyzeOptimization(code, language) {
 
 function renderList(node, items) {
   const fragment = document.createDocumentFragment();
-
   node.replaceChildren();
-
   for (const item of items) {
     const listItem = document.createElement("li");
     listItem.textContent = item;
     fragment.appendChild(listItem);
   }
-
   node.appendChild(fragment);
-}
-
-function renderOptimizedCode(original, optimized) {
-  const fragment = document.createDocumentFragment();
-  const originalLineSet = new Set(
-    original
-      .split(linesPattern)
-      .map((line) => line.trim())
-      .filter(Boolean)
-  );
-  const optimizedLines = optimized.split(linesPattern);
-
-  optimizedCodeBlock.replaceChildren();
-
-  optimizedLines.forEach((line, index) => {
-    const lineNode = document.createElement("span");
-    lineNode.textContent = line || " ";
-
-    if (line.trim() && !originalLineSet.has(line.trim())) {
-      lineNode.classList.add("changed-line");
-    }
-
-    fragment.appendChild(lineNode);
-
-    if (index < optimizedLines.length - 1) {
-      fragment.appendChild(document.createTextNode("\n"));
-    }
-  });
-
-  optimizedCodeBlock.appendChild(fragment);
 }
 
 function render() {
@@ -831,8 +1352,17 @@ function render() {
     payload.targetLanguage = nextTarget;
   }
 
-  originalCodeBlock.textContent = optimization.original;
-  renderOptimizedCode(optimization.original, optimization.optimized);
+  // Sync source highlight overlay
+  applySourceHighlight(code, detected.name);
+
+  // Populate optimized code block with syntax highlighting
+  if (code.trim()) {
+    applyOptimizedHighlight(optimization.optimized, detected.name);
+  } else {
+    optimizedCodeBlock.className = "";
+    optimizedCodeBlock.textContent = "Paste source code to see the optimized version.";
+  }
+
   renderList(optimizationList, optimization.changes);
 }
 
@@ -863,19 +1393,23 @@ function translate() {
   statusPill.textContent = "Translating";
   translateButton.disabled = true;
 
+  const loader = document.getElementById("translateLoader");
+  loader.classList.add("active");
+
   window.setTimeout(async () => {
     const detected = detectLanguage(sourceCode.value);
     const payload = buildTranslatePayload(sourceCode.value, detected.name, targetLanguage.value);
 
     try {
       const output = await requestTranslation(payload);
-      translatedOutput.textContent = output;
+      applyOutputHighlight(output, targetLanguage.value);
       render();
       statusPill.textContent = "Validated";
     } catch (error) {
       translatedOutput.textContent = error.message;
       statusPill.textContent = "API Error";
     } finally {
+      loader.classList.remove("active");
       translateButton.disabled = false;
     }
   }, 300);
@@ -890,14 +1424,33 @@ async function copyText(text, button) {
   }, 1200);
 }
 
+const optimizationPanel = document.getElementById("optimizationPanel");
+const resultGrid = document.getElementById("resultGrid");
+
+function updateOptimizationPanelVisibility() {
+  const show = optimizeToggle.checked;
+  optimizationPanel.style.display = show ? "" : "none";
+  resultGrid.style.gridTemplateColumns = show ? "" : "1fr";
+}
+
+// Re-highlight source after Prism autoloader fetches a new language grammar
+if (window.Prism && Prism.plugins && Prism.plugins.autoloader) {
+  Prism.plugins.autoloader.languages_path =
+    "https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/";
+}
+
 populateTargets();
 setSelectedStyle(defaultStyle, false);
+updateOptimizationPanelVisibility();
 render();
 
 sourceCode.addEventListener("input", render);
 targetLanguage.addEventListener("change", render);
-optimizeToggle.addEventListener("change", render);
-commentsToggle.addEventListener("change", render);
+optimizeToggle.addEventListener("change", () => {
+  updateOptimizationPanelVisibility();
+  render();
+});
+commentsToggle.addEventListener("change", translate);
 styleSelect.addEventListener("click", (event) => {
   const button = event.target.closest(".mode-button");
 
@@ -914,20 +1467,18 @@ sampleButton.addEventListener("click", () => {
 });
 
 copyReportButton.addEventListener("click", () => {
-  const report = [
-    "Original Code:",
-    originalCodeBlock.textContent,
-    "",
-    "Optimized Code:",
-    optimizedCodeBlock.textContent,
-    "",
-    "Changes Made:",
-    ...[...optimizationList.querySelectorAll("li")]
-      .map((item) => `- ${item.textContent}`)
-  ].join("\n");
-  copyText(report, copyReportButton);
+  copyText(optimizedCodeBlock.textContent, copyReportButton);
 });
 
 copyOutputButton.addEventListener("click", () => {
   copyText(translatedOutput.textContent, copyOutputButton);
+});
+
+// Keep the highlight pre scrolled in sync with the textarea
+sourceCode.addEventListener("scroll", () => {
+  const pre = document.getElementById("sourceHighlight");
+  if (pre) {
+    pre.scrollTop = sourceCode.scrollTop;
+    pre.scrollLeft = sourceCode.scrollLeft;
+  }
 });

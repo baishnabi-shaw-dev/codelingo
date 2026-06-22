@@ -100,7 +100,8 @@ h3 {
 }
 
 .result-grid {
-  grid-template-columns: 0.85fr 1.15fr;
+  grid-template-columns: 1fr 340px;
+  align-items: start;
 }
 
 .panel {
@@ -144,16 +145,59 @@ select,
   background: #111318;
 }
 
+/* Overlay editor: textarea sits on top of a <pre> for live highlighting */
+.code-editor-wrap {
+  position: relative;
+  border-radius: 0 0 8px 8px;
+  background: #111318;
+  overflow: hidden;
+}
+
+.code-highlight {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 18px;
+  font: 0.875rem/1.55 "Fira Code", "Cascadia Code", "Consolas", monospace;
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  color: transparent; /* text rendered by Prism spans, not bare text */
+}
+
+/* Override Prism's own pre background so ours shows through */
+.code-highlight[class*="language-"],
+pre.code-highlight > code {
+  background: transparent !important;
+  font: inherit;
+}
+
 textarea {
   display: block;
-  min-height: 380px;
+  position: relative;
+  width: 100%;
+  height: 380px;
+  min-height: 120px;
   resize: vertical;
   padding: 18px;
   border: 0;
-  border-radius: 0 0 8px 8px;
+  border-radius: 0;
   outline: none;
+  overflow: auto;
   line-height: 1.55;
   tab-size: 2;
+  font: 0.875rem/1.55 "Fira Code", "Cascadia Code", "Consolas", monospace;
+  color: transparent;
+  caret-color: var(--brand);
+  background: transparent;
+  white-space: pre-wrap;
+  word-break: break-word;
+  z-index: 1;
 }
 
 textarea:focus,
@@ -202,6 +246,11 @@ button:focus-visible {
 }
 
 select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: #111318;
   height: 46px;
   padding: 0 12px;
 }
@@ -289,57 +338,121 @@ input[type="checkbox"] {
   font-weight: 900;
 }
 
+/* ── Translated output wrapper + loader ─────────────────── */
+.output-wrap {
+  position: relative;
+}
+
+.translate-loader {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: rgba(17, 19, 24, 0.82);
+  border-radius: 0 0 8px 8px;
+  justify-content: center;
+  align-items: center;
+}
+
+.translate-loader.active {
+  display: flex;
+}
+
+.loader {
+  position: relative;
+  width: 90px;
+  height: 90px;
+}
+
+.ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 3px solid transparent;
+}
+
+.ring1 {
+  width: 90px;
+  height: 90px;
+  border-top-color: #10b981;
+  animation: spin 2s linear infinite;
+}
+
+.ring2 {
+  width: 64px;
+  height: 64px;
+  top: 13px;
+  left: 13px;
+  border-bottom-color: #34d399;
+  animation: spinReverse 1.5s linear infinite;
+}
+
+.ring3 {
+  width: 38px;
+  height: 38px;
+  top: 26px;
+  left: 26px;
+  border-left-color: #6ee7b7;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spinReverse {
+  to { transform: rotate(-360deg); }
+}
+
+/* ── Ensure optimization panel is always tall enough to be visible */
+#optimizationPanel {
+  min-height: 200px;
+}
+
+.optimized-output {
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  height: 260px;
+}
+
+.optimization-notes {
+  display: flex;
+  flex-direction: column;
+}
+
+.optimization-notes-head {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.optimization-notes-head h3 {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .report-list {
   display: grid;
   gap: 12px;
   margin: 0;
   padding: 18px 18px 18px 36px;
   color: var(--muted);
+  overflow-y: auto;
+  max-height: 340px;
+}
+
+.report-list:empty::after {
+  content: "Paste source code to see optimization suggestions.";
+  color: var(--muted);
+  font-size: 0.88rem;
+  list-style: none;
+  display: block;
+  padding: 0;
 }
 
 .report-list li::marker {
   color: var(--accent);
-}
-
-.optimization-notes {
-  border-top: 1px solid var(--line);
-  padding-top: 18px;
-}
-
-.optimization-notes h3,
-.code-compare-block h3 {
-  padding: 0 18px;
-}
-
-.comparison-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
-}
-
-.code-compare-block {
-  min-width: 0;
-}
-
-.code-compare-block + .code-compare-block {
-  border-left: 1px solid var(--line);
-}
-
-.code-compare-block h3 {
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--line);
-}
-
-.compare-output {
-  min-height: 300px;
-  border-radius: 0;
-  font-size: 0.9rem;
-}
-
-.compare-output.optimized {
-  color: #d9f7ea;
 }
 
 .changed-line {
@@ -352,15 +465,40 @@ input[type="checkbox"] {
 }
 
 .code-output {
-  min-height: 260px;
+  height: 320px;
+  min-height: 120px;
   margin: 0;
   overflow: auto;
+  resize: vertical;
   padding: 18px;
   border: 0;
   border-radius: 0 0 8px 8px;
   line-height: 1.55;
   white-space: pre-wrap;
+  word-break: break-word;
+  font: 0.875rem/1.55 "Fira Code", "Cascadia Code", "Consolas", monospace;
+  background: #111318;
 }
+
+/* Override Prism's injected background on the output code block */
+.code-output[class*="language-"],
+.code-output > code[class*="language-"] {
+  background: transparent !important;
+  font: inherit;
+  color: inherit;
+}
+
+/* Prism tomorrow-night token colours already come from the CDN theme.
+   These are kept as fallbacks for the auto-loader gap. */
+.token.keyword   { color: #cc99cd; }
+.token.string    { color: #7ec699; }
+.token.comment   { color: #999; font-style: italic; }
+.token.number    { color: #f08d49; }
+.token.operator  { color: #67cdcc; }
+.token.function  { color: #6fb3d2; }
+.token.class-name{ color: #e8c47d; }
+.token.punctuation { color: #ccc; }
+.token.builtin   { color: #67cdcc; }
 
 .prompt-panel textarea {
   min-height: 270px;
